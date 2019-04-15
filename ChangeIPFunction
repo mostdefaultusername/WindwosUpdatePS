@@ -1,0 +1,64 @@
+@'
+Смена ип:
+1. ищем активный интерфейс: он имеет Status "Up", и имеет наименьшую метрику
+    1.1 Получение метрики интерфейса: Get-NetIPInterface
+    1.2 Сохраняем его настройки
+2. сбрасываем текщие настройки интерфейса (использовать -Confirm:$false чтобы не задавал вопросов)
+    2.1 сбрасываем ИП
+    2.2 сбрасываем ДНС
+    2.3 сбрасываем шлюз
+3. устанавливаем нужный ип
+    3.1 устанавливаем ип, маску и шлюз
+    3.2 устанавливаем днс сервера
+4. проверяем интерфейс
+    4.1 если есть соединение в 8.8.8.8 интернет есть, оставляем всё как есть
+    4.2 если интернета нет, возвращаем предыдущие настройки
+'@
+#№1
+#№1.1
+$activeadapter=Get-NetIPInterface|where{$_.ConnectionState -eq "Connected" -and $_.AddressFamily -eq "IPv4"}|sort -Property InterfaceMetric|Select-Object -First 1
+#№1.2
+$savedsettings=Get-NetIPAddress -InterfaceIndex $activeadapter.ifIndex
+$DHCPuse=$activeadapter.Dhcp
+
+#№2
+#№2.1
+$activeadapter| Remove-NetIPAddress -Confirm:$false
+#№2.2
+$activeadapter| Set-DnsClientServerAddress -ResetServerAddresses -Confirm:$false
+#№2.3
+$activeadapter| Remove-NetRoute -DestinationPrefix 0.0.0.0/0
+
+#№3
+#№3.1
+$activeadapter| New-NetIPAddress -IPAddress 172.20.0.100 -PrefixLength 24 -DefaultGateway 172.20.0.1
+#№3.2
+$activeadapter| Set-DnsClientServerAddress -ServerAddresses 172.20.0.8,172.20.0.9
+
+#№4
+#№4.1
+if(Test-Connection 8.8.8.8 -Count 20)
+{
+    Write-host("Succses")
+}
+#№4.2
+else
+{
+    if($DHCPuse)
+    {
+        $activeadapter| Set-NetIPInterface -Dhcp Enabled
+        $activeadapter| Set-DnsClientServerAddress -ResetServerAddresses
+    }
+    else
+    {
+        $activeadapter| Remove-NetIPAddress -Confirm:$false
+        $activeadapter| Set-DnsClientServerAddress -ResetServerAddresses -Confirm:$false
+        $activeadapter| Remove-NetRoute -DestinationPrefix 0.0.0.0/0
+    
+        $activeadapter| New-NetIPAddress -IPAddress $savedsettings.IPv4Address -PrefixLength $savedsettings.PrefixLength -DefaultGateway 172.20.0.1
+        $activeadapter| Set-DnsClientServerAddress -ServerAddresses 172.20.0.8,172.20.0.9
+    }
+
+}
+
+
